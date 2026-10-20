@@ -132,4 +132,48 @@ class ClienteRepositoryTest {
         assertThat(resultadoAtivo.getContent().getFirst().getEmail()).isEqualTo("cliente@exemplo.com");
         assertThat(resultadoInativoIncompativel.isEmpty()).isTrue();
     }
+
+    @Test
+    @DisplayName("Deve contar todos os clientes cadastrados")
+    void deveContarTodosOsClientesCadastrados() {
+        Cliente inativo = new Cliente("Cliente Inativo", "inativo@exemplo.com");
+        inativo.inativar();
+        repository.save(inativo);
+
+        long total = repository.count();
+
+        assertThat(total).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Deve contar clientes filtrando por status ativo")
+    void deveContarClientesFiltrandoPorStatusAtivo() {
+        Cliente inativo1 = new Cliente("Cliente Inativo 1", "inativo1@exemplo.com");
+        inativo1.inativar();
+        repository.save(inativo1);
+
+        Cliente inativo2 = new Cliente("Cliente Inativo 2", "inativo2@exemplo.com");
+        inativo2.inativar();
+        repository.save(inativo2);
+
+        long totalAtivos = repository.countByAtivo(true);
+        long totalInativos = repository.countByAtivo(false);
+
+        assertThat(totalAtivos).isEqualTo(1);
+        assertThat(totalInativos).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Deve retornar zero na contagem quando a base estiver vazia")
+    void deveRetornarZeroNaContagemQuandoBaseEstiverVazia() {
+        repository.deleteAll();
+
+        long total = repository.count();
+        long totalAtivos = repository.countByAtivo(true);
+        long totalInativos = repository.countByAtivo(false);
+
+        assertThat(total).isZero();
+        assertThat(totalAtivos).isZero();
+        assertThat(totalInativos).isZero();
+    }
 }
