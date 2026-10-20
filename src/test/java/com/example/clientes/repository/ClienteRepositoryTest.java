@@ -176,4 +176,23 @@ class ClienteRepositoryTest {
         assertThat(totalAtivos).isZero();
         assertThat(totalInativos).isZero();
     }
+
+    @Test
+    @DisplayName("Deve retornar true em existsByEmailIgnoreCase com e-mail exato (CLI-27 AC-1)")
+    void deveRetornarTrueEmExistsByEmailIgnoreCaseComEmailExato() {
+        assertThat(repository.existsByEmailIgnoreCase("cliente@exemplo.com")).isTrue();
+    }
+
+    @Test
+    @DisplayName("Deve retornar true em existsByEmailIgnoreCase com caixa diferente (CLI-27 AC-3)")
+    void deveRetornarTrueEmExistsByEmailIgnoreCaseComCaixaDiferente() {
+        assertThat(repository.existsByEmailIgnoreCase("CLIENTE@Exemplo.COM")).isTrue();
+    }
+
+    @Test
+    @DisplayName("Deve retornar false em existsByEmailIgnoreCase para e-mail inexistente ou parcial (CLI-27 AC-2)")
+    void deveRetornarFalseEmExistsByEmailIgnoreCaseParaEmailInexistente() {
+        assertThat(repository.existsByEmailIgnoreCase("naoexiste@exemplo.com")).isFalse();
+        assertThat(repository.existsByEmailIgnoreCase("cliente@exemplo.co")).isFalse();
+    }
 }
