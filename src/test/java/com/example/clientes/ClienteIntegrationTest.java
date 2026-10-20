@@ -36,6 +36,17 @@ class ClienteIntegrationTest {
         repository.save(new Cliente("Cliente Exemplo", "cliente@exemplo.com"));
     }
 
+    private void popularClientesParaContagem() {
+        repository.deleteAll();
+        for (int i = 1; i <= 5; i++) {
+            repository.save(new Cliente("Cliente Ativo " + i, "ativo" + i + "@exemplo.com"));
+        }
+        for (int i = 1; i <= 3; i++) {
+            Cliente inativo = repository.save(new Cliente("Cliente Inativo " + i, "inativo" + i + "@exemplo.com"));
+            service.inativar(inativo.getId());
+        }
+    }
+
     @Test
     @DisplayName("Deve retornar cliente correspondente ao filtrar por e-mail exato (AC-1)")
     void deveEncontrarClientePorEmailExato() throws Exception {
@@ -159,5 +170,53 @@ class ClienteIntegrationTest {
         mvc.perform(get("/api/v1/clientes"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(2)));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem total de clientes sem filtro de status ativo (AC-1)")
+    void deveRetornarContagemTotalDeClientesSemFiltro() throws Exception {
+        popularClientesParaContagem();
+
+        mvc.perform(get("/api/v1/clientes/contagem"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(8));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem apenas de clientes ativos quando ativo=true (AC-2)")
+    void deveRetornarContagemDeClientesAtivos() throws Exception {
+        popularClientesParaContagem();
+
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(5));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem apenas de clientes inativos quando ativo=false (AC-3)")
+    void deveRetornarContagemDeClientesInativos() throws Exception {
+        popularClientesParaContagem();
+
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(3));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem zero quando a base de clientes estiver vazia (AC-4)")
+    void deveRetornarContagemZeroQuandoBaseEstiverVazia() throws Exception {
+        repository.deleteAll();
+
+        mvc.perform(get("/api/v1/clientes/contagem"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 Bad Request quando parâmetro ativo for inválido (AC-5)")
+    void deveRetornar400QuandoParametroAtivoForInvalido() throws Exception {
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "invalido"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
     }
 }
