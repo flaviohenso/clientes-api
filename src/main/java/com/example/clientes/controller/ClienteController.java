@@ -1,5 +1,6 @@
 package com.example.clientes.controller;
 
+import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.service.ClienteService;
@@ -41,6 +42,11 @@ public class ClienteController {
                                         @RequestParam(required = false) Boolean ativo,
                                         @PageableDefault(size = 20, sort = "nome") Pageable pageable) {
         return service.listar(nome, email, ativo, pageable);
+    }
+
+    @GetMapping("/contagem")
+    public ClienteContagemResponse contar(@RequestParam(required = false) Boolean ativo) {
+        return service.contar(ativo);
     }
 
     @GetMapping("/{id}")
