@@ -1,5 +1,6 @@
 package com.example.clientes.controller;
 
+import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -191,5 +192,52 @@ class ClienteControllerTest {
         mvc.perform(get("/api/v1/clientes"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem total de clientes sem filtro retornando HTTP 200 (AC-1)")
+    void contarSemFiltroRetorna200ComTotal() throws Exception {
+        when(service.contar(isNull())).thenReturn(new ClienteContagemResponse(8L));
+
+        mvc.perform(get("/api/v1/clientes/contagem"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(8));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem de clientes ativos com ativo=true retornando HTTP 200 (AC-2)")
+    void contarComFiltroAtivoTrueRetorna200ComTotal() throws Exception {
+        when(service.contar(eq(true))).thenReturn(new ClienteContagemResponse(5L));
+
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(5));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem de clientes inativos com ativo=false retornando HTTP 200 (AC-3)")
+    void contarComFiltroAtivoFalseRetorna200ComTotal() throws Exception {
+        when(service.contar(eq(false))).thenReturn(new ClienteContagemResponse(3L));
+
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(3));
+    }
+
+    @Test
+    @DisplayName("Deve retornar contagem zerada quando não houver clientes retornando HTTP 200 (AC-4)")
+    void contarBaseVaziaRetorna200ComTotalZero() throws Exception {
+        when(service.contar(isNull())).thenReturn(new ClienteContagemResponse(0L));
+
+        mvc.perform(get("/api/v1/clientes/contagem"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 Bad Request quando parâmetro ativo for inválido (AC-5)")
+    void contarComParametroAtivoInvalidoRetorna400() throws Exception {
+        mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "invalido"))
+                .andExpect(status().isBadRequest());
     }
 }

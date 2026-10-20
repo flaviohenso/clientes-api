@@ -1,6 +1,7 @@
 package com.example.clientes.service;
 
 import com.example.clientes.domain.Cliente;
+import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -259,5 +260,53 @@ class ClienteServiceTest {
 
         assertThat(resultado.getContent()).hasSize(1);
         verify(repository).findByEmailIgnoreCaseAndAtivo("ana@x.com", true, pageable);
+    }
+
+    @Test
+    @DisplayName("Deve contar todos os clientes quando o parâmetro ativo for nulo (AC-1)")
+    void deveContarTodosOsClientesQuandoAtivoForNulo() {
+        when(repository.count()).thenReturn(8L);
+
+        ClienteContagemResponse resposta = service.contar(null);
+
+        assertThat(resposta.total()).isEqualTo(8L);
+        verify(repository).count();
+        verify(repository, never()).countByAtivo(any());
+    }
+
+    @Test
+    @DisplayName("Deve contar clientes filtrando por ativo verdadeiro (AC-2)")
+    void deveContarClientesAtivosQuandoAtivoForTrue() {
+        when(repository.countByAtivo(true)).thenReturn(5L);
+
+        ClienteContagemResponse resposta = service.contar(true);
+
+        assertThat(resposta.total()).isEqualTo(5L);
+        verify(repository).countByAtivo(true);
+        verify(repository, never()).count();
+    }
+
+    @Test
+    @DisplayName("Deve contar clientes filtrando por ativo falso (AC-3)")
+    void deveContarClientesInativosQuandoAtivoForFalse() {
+        when(repository.countByAtivo(false)).thenReturn(3L);
+
+        ClienteContagemResponse resposta = service.contar(false);
+
+        assertThat(resposta.total()).isEqualTo(3L);
+        verify(repository).countByAtivo(false);
+        verify(repository, never()).count();
+    }
+
+    @Test
+    @DisplayName("Deve retornar total zero na contagem quando base estiver vazia (AC-4)")
+    void deveRetornarZeroNaContagemQuandoBaseEstiverVazia() {
+        when(repository.count()).thenReturn(0L);
+
+        ClienteContagemResponse resposta = service.contar(null);
+
+        assertThat(resposta.total()).isZero();
+        verify(repository).count();
+        verify(repository, never()).countByAtivo(any());
     }
 }

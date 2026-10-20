@@ -1,6 +1,7 @@
 package com.example.clientes.service;
 
 import com.example.clientes.domain.Cliente;
+import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -52,6 +53,11 @@ public class ClienteService {
             }
         }
         return page.map(ClienteResponse::from);
+    }
+
+    public ClienteContagemResponse contar(Boolean ativo) {
+        long total = ativo != null ? repository.countByAtivo(ativo) : repository.count();
+        return new ClienteContagemResponse(total);
     }
 
     public ClienteResponse buscar(Long id) {
