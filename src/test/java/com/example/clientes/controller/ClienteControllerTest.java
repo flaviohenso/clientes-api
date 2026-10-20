@@ -1,6 +1,7 @@
 package com.example.clientes.controller;
 
 import com.example.clientes.dto.ClienteContagemResponse;
+import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -22,6 +23,8 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -239,5 +242,67 @@ class ClienteControllerTest {
     void contarComParametroAtivoInvalidoRetorna400() throws Exception {
         mvc.perform(get("/api/v1/clientes/contagem").param("ativo", "invalido"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Deve retornar 200 com existe=true quando e-mail cadastrado (AC-1)")
+    void emailExisteRetorna200ComTrue() throws Exception {
+        when(service.emailExiste("maria@exemplo.com")).thenReturn(new ClienteEmailExisteResponse(true));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "maria@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(true));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 200 com existe=false quando e-mail não cadastrado (AC-2)")
+    void emailExisteRetorna200ComFalse() throws Exception {
+        when(service.emailExiste("naoexiste@exemplo.com")).thenReturn(new ClienteEmailExisteResponse(false));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "naoexiste@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(false));
+    }
+
+    @Test
+    @DisplayName("Deve repassar ao service o e-mail com maiúsculas/minúsculas misturadas (AC-3)")
+    void emailExisteRepassaEmailComCaixaMistaAoService() throws Exception {
+        when(service.emailExiste("MARIA@Exemplo.COM")).thenReturn(new ClienteEmailExisteResponse(true));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "MARIA@Exemplo.COM"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(true));
+
+        verify(service).emailExiste("MARIA@Exemplo.COM");
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 ProblemDetail quando o parâmetro email não for informado (AC-4)")
+    void emailExisteSemParametroRetorna400ProblemDetail() throws Exception {
+        mvc.perform(get("/api/v1/clientes/email-existe"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 ProblemDetail quando email for vazio (AC-4)")
+    void emailExisteComEmailVazioRetorna400ProblemDetail() throws Exception {
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 ProblemDetail quando email estiver em branco (AC-4)")
+    void emailExisteComEmailEmBrancoRetorna400ProblemDetail() throws Exception {
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(service);
     }
 }
