@@ -2,6 +2,7 @@ package com.example.clientes.service;
 
 import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
+import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -58,6 +59,11 @@ public class ClienteService {
     public ClienteContagemResponse contar(Boolean ativo) {
         long total = ativo != null ? repository.countByAtivo(ativo) : repository.count();
         return new ClienteContagemResponse(total);
+    }
+
+    public ClienteEmailExisteResponse emailExiste(String email) {
+        String emailNormalizado = email == null ? null : email.trim();
+        return new ClienteEmailExisteResponse(repository.existsByEmailIgnoreCase(emailNormalizado));
     }
 
     public ClienteResponse buscar(Long id) {
