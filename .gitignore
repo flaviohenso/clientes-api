@@ -1,0 +1,4 @@
+target/
+.idea/
+*.iml
+.squad/index.db*

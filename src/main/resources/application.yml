@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: clientes-api
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:h2:mem:clientes;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  mvc:
+    problemdetails:
+      enabled: true
