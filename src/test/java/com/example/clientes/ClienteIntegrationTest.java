@@ -219,4 +219,50 @@ class ClienteIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
     }
+
+    @Test
+    @DisplayName("Deve retornar existe=true para e-mail cadastrado com correspondência exata (CLI-27 AC-1)")
+    void deveRetornarExisteTrueParaEmailCadastrado() throws Exception {
+        repository.save(new Cliente("Maria", "maria@exemplo.com"));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "maria@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(true));
+    }
+
+    @Test
+    @DisplayName("Deve retornar existe=false para e-mail inexistente (CLI-27 AC-2)")
+    void deveRetornarExisteFalseParaEmailInexistente() throws Exception {
+        repository.save(new Cliente("Maria", "maria@exemplo.com"));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "naoexiste@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(false));
+    }
+
+    @Test
+    @DisplayName("Deve retornar existe=true ignorando maiúsculas e minúsculas (CLI-27 AC-3)")
+    void deveRetornarExisteTrueIgnorandoCaixa() throws Exception {
+        repository.save(new Cliente("Maria", "maria@exemplo.com"));
+
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "MARIA@Exemplo.COM"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.existe").value(true));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 quando o parâmetro email não for informado (CLI-27 AC-4)")
+    void deveRetornar400QuandoEmailNaoInformado() throws Exception {
+        mvc.perform(get("/api/v1/clientes/email-existe"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 quando o parâmetro email estiver em branco (CLI-27)")
+    void deveRetornar400QuandoEmailEmBranco() throws Exception {
+        mvc.perform(get("/api/v1/clientes/email-existe").param("email", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
 }

@@ -2,6 +2,7 @@ package com.example.clientes.service;
 
 import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
+import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -308,5 +309,50 @@ class ClienteServiceTest {
         assertThat(resposta.total()).isZero();
         verify(repository).count();
         verify(repository, never()).countByAtivo(any());
+    }
+
+    @Test
+    @DisplayName("Deve retornar existe=true quando o e-mail estiver cadastrado (AC-1)")
+    void deveRetornarTrueQuandoEmailExiste() {
+        when(repository.existsByEmailIgnoreCase("maria@exemplo.com")).thenReturn(true);
+
+        ClienteEmailExisteResponse resposta = service.emailExiste("maria@exemplo.com");
+
+        assertThat(resposta.existe()).isTrue();
+        verify(repository).existsByEmailIgnoreCase("maria@exemplo.com");
+    }
+
+    @Test
+    @DisplayName("Deve retornar existe=false quando o e-mail não estiver cadastrado (AC-2)")
+    void deveRetornarFalseQuandoEmailNaoExiste() {
+        when(repository.existsByEmailIgnoreCase("naoexiste@exemplo.com")).thenReturn(false);
+
+        ClienteEmailExisteResponse resposta = service.emailExiste("naoexiste@exemplo.com");
+
+        assertThat(resposta.existe()).isFalse();
+        verify(repository).existsByEmailIgnoreCase("naoexiste@exemplo.com");
+    }
+
+    @Test
+    @DisplayName("Deve delegar ao repository com e-mail de caixa diferente e retornar true (AC-3)")
+    void deveRetornarTrueParaEmailComCaixaDiferente() {
+        when(repository.existsByEmailIgnoreCase("MARIA@Exemplo.COM")).thenReturn(true);
+
+        ClienteEmailExisteResponse resposta = service.emailExiste("MARIA@Exemplo.COM");
+
+        assertThat(resposta.existe()).isTrue();
+        verify(repository).existsByEmailIgnoreCase("MARIA@Exemplo.COM");
+    }
+
+    @Test
+    @DisplayName("Deve aplicar trim no e-mail antes de consultar o repository")
+    void deveAplicarTrimNoEmailAntesDeConsultarRepository() {
+        when(repository.existsByEmailIgnoreCase("maria@exemplo.com")).thenReturn(true);
+
+        ClienteEmailExisteResponse resposta = service.emailExiste("   maria@exemplo.com  ");
+
+        assertThat(resposta.existe()).isTrue();
+        verify(repository).existsByEmailIgnoreCase("maria@exemplo.com");
+        verify(repository, never()).existsByEmailIgnoreCase("   maria@exemplo.com  ");
     }
 }

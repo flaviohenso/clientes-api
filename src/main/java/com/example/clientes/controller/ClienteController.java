@@ -1,11 +1,13 @@
 package com.example.clientes.controller;
 
 import com.example.clientes.dto.ClienteContagemResponse;
+import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.service.ClienteService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -47,6 +49,12 @@ public class ClienteController {
     @GetMapping("/contagem")
     public ClienteContagemResponse contar(@RequestParam(required = false) Boolean ativo) {
         return service.contar(ativo);
+    }
+
+    @GetMapping("/email-existe")
+    public ClienteEmailExisteResponse emailExiste(
+            @RequestParam @NotBlank(message = "O e-mail não pode ser vazio ou em branco") String email) {
+        return service.emailExiste(email);
     }
 
     @GetMapping("/{id}")
