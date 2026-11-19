@@ -14,6 +14,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,8 +63,25 @@ class ClienteIntegrationTest {
         return repository.findById(salvo.getId()).orElseThrow();
     }
 
+    private List<Cliente> salvarClientesAtivosEmLote(int quantidade) {
+        List<Cliente> novos = new ArrayList<>(quantidade);
+        for (int i = 1; i <= quantidade; i++) {
+            novos.add(new Cliente("Cliente Lote " + i, "lote." + i + "@exemplo.com"));
+        }
+        List<Cliente> salvos = new ArrayList<>(quantidade);
+        repository.saveAll(novos).forEach(salvos::add);
+        return salvos;
+    }
+
     private static String payloadEmail(String email) {
         return "{\"email\":\"%s\"}".formatted(email);
+    }
+
+    private static String payloadInativarLote(List<Long> ids) {
+        String itens = ids.stream()
+                .map(id -> id == null ? "null" : id.toString())
+                .collect(Collectors.joining(", "));
+        return "{\"ids\":[%s]}".formatted(itens);
     }
 
     private static String emailValidoComTamanho(int tamanhoTotal) {
@@ -76,6 +97,12 @@ class ClienteIntegrationTest {
                 .content(payloadJson));
     }
 
+    private ResultActions executarPatchInativarLote(String payloadJson) throws Exception {
+        return mvc.perform(patch("/api/v1/clientes/inativar-lote")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadJson));
+    }
+
     private void assertPatchEmailInvalidoPreservaEmail(String payloadJson) throws Exception {
         Cliente maria = salvarERecarregar("Maria Silva", "maria@exemplo.com");
 
@@ -84,6 +111,22 @@ class ClienteIntegrationTest {
 
         Cliente persistido = repository.findById(maria.getId()).orElseThrow();
         assertEquals("maria@exemplo.com", persistido.getEmail());
+    }
+
+    private void assertPatchInativarLoteInvalidoPreservaEstado(String payloadJson, List<Cliente> clientesParaVerificar) throws Exception {
+        long ativosAntes = repository.countByAtivo(true);
+        long inativosAntes = repository.countByAtivo(false);
+
+        executarPatchInativarLote(payloadJson)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        assertEquals(ativosAntes, repository.countByAtivo(true));
+        assertEquals(inativosAntes, repository.countByAtivo(false));
+        for (Cliente cliente : clientesParaVerificar) {
+            Cliente persistido = repository.findById(cliente.getId()).orElseThrow();
+            assertTrue(persistido.isAtivo());
+        }
     }
 
     @Test
@@ -497,5 +540,159 @@ class ClienteIntegrationTest {
         assertEquals("Maria Silva", atualizado.getNome());
         assertTrue(atualizado.isAtivo());
         assertEquals(criadoEmOriginal, atualizado.getCriadoEm());
+    }
+
+    @Test
+    @DisplayName("Deve inativar lote de clientes ativos com sucesso e persistir ativo=false (CLI-29 AC-1)")
+    void deveInativarLoteDeClientesAtivosComSucesso() throws Exception {
+        Cliente naoAfetado = salvarERecarregar("Cliente Nao Afetado", "nao.afetado@exemplo.com");
+        Cliente c1 = salvarERecarregar("Cliente Um", "lote.um@exemplo.com");
+        Cliente c2 = salvarERecarregar("Cliente Dois", "lote.dois@exemplo.com");
+        Cliente c3 = salvarERecarregar("Cliente Tres", "lote.tres@exemplo.com");
+
+        executarPatchInativarLote(payloadInativarLote(List.of(c1.getId(), c2.getId(), c3.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalProcessados").value(3))
+                .andExpect(jsonPath("$.idsInativados", hasSize(3)))
+                .andExpect(jsonPath("$.idsInativados[0]").value(c1.getId()))
+                .andExpect(jsonPath("$.idsInativados[1]").value(c2.getId()))
+                .andExpect(jsonPath("$.idsInativados[2]").value(c3.getId()));
+
+        assertFalse(repository.findById(c1.getId()).orElseThrow().isAtivo());
+        assertFalse(repository.findById(c2.getId()).orElseThrow().isAtivo());
+        assertFalse(repository.findById(c3.getId()).orElseThrow().isAtivo());
+        assertTrue(repository.findById(naoAfetado.getId()).orElseThrow().isAtivo());
+    }
+
+    @Test
+    @DisplayName("Deve processar lote de forma idempotente quando cliente já estiver inativo (CLI-29 AC-2)")
+    void deveInativarLoteDeFormaIdempotenteComClienteJaInativo() throws Exception {
+        Cliente ativo = salvarERecarregar("Cliente Ativo", "idemp.ativo@exemplo.com");
+        Cliente jaInativo = salvarERecarregar("Cliente Ja Inativo", "idemp.inativo@exemplo.com");
+        service.inativar(jaInativo.getId());
+        assertFalse(repository.findById(jaInativo.getId()).orElseThrow().isAtivo());
+
+        executarPatchInativarLote(payloadInativarLote(List.of(ativo.getId(), jaInativo.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalProcessados").value(2))
+                .andExpect(jsonPath("$.idsInativados", hasSize(2)))
+                .andExpect(jsonPath("$.idsInativados[0]").value(ativo.getId()))
+                .andExpect(jsonPath("$.idsInativados[1]").value(jaInativo.getId()));
+
+        assertFalse(repository.findById(ativo.getId()).orElseThrow().isAtivo());
+        assertFalse(repository.findById(jaInativo.getId()).orElseThrow().isAtivo());
+    }
+
+    @Test
+    @DisplayName("Deve desduplicar identificadores repetidos preservando a ordem da primeira ocorrência (CLI-29 AC-3)")
+    void deveDesduplicarIdentificadoresRepetidosNoLote() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Um", "dup1@exemplo.com");
+        Cliente c2 = salvarERecarregar("Cliente Dois", "dup2@exemplo.com");
+
+        executarPatchInativarLote(payloadInativarLote(List.of(c1.getId(), c2.getId(), c1.getId(), c2.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalProcessados").value(2))
+                .andExpect(jsonPath("$.idsInativados", hasSize(2)))
+                .andExpect(jsonPath("$.idsInativados[0]").value(c1.getId()))
+                .andExpect(jsonPath("$.idsInativados[1]").value(c2.getId()));
+
+        assertFalse(repository.findById(c1.getId()).orElseThrow().isAtivo());
+        assertFalse(repository.findById(c2.getId()).orElseThrow().isAtivo());
+    }
+
+    @Test
+    @DisplayName("Deve garantir atomicidade com HTTP 404 ProblemDetail sem alterar clientes quando houver ID inexistente no lote (CLI-29 AC-4)")
+    void deveGarantirAtomicidadeCom404ProblemDetailQuandoHouverIdInexistenteNoLote() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Um", "atom1@exemplo.com");
+        Cliente c2 = salvarERecarregar("Cliente Dois", "atom2@exemplo.com");
+        long idInexistente = Math.max(999L, c2.getId() + 100L);
+        assertFalse(repository.existsById(idInexistente));
+        long ativosAntes = repository.countByAtivo(true);
+        long inativosAntes = repository.countByAtivo(false);
+
+        executarPatchInativarLote(payloadInativarLote(List.of(c1.getId(), idInexistente, c2.getId())))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.title").isNotEmpty())
+                .andExpect(jsonPath("$.detail").isNotEmpty());
+
+        assertEquals(ativosAntes, repository.countByAtivo(true));
+        assertEquals(inativosAntes, repository.countByAtivo(false));
+        assertTrue(repository.findById(c1.getId()).orElseThrow().isAtivo());
+        assertTrue(repository.findById(c2.getId()).orElseThrow().isAtivo());
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 sem efeitos colaterais quando campo ids estiver ausente (CLI-29 AC-5)")
+    void deveRetornar400SemEfeitosColateraisQuandoCampoIdsEstiverAusente() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Ativo", "ausente@exemplo.com");
+        assertPatchInativarLoteInvalidoPreservaEstado("{}", List.of(c1));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 sem efeitos colaterais quando campo ids for nulo (CLI-29 AC-5)")
+    void deveRetornar400SemEfeitosColateraisQuandoCampoIdsForNulo() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Ativo", "nulo@exemplo.com");
+        assertPatchInativarLoteInvalidoPreservaEstado("{\"ids\":null}", List.of(c1));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 sem efeitos colaterais quando lista ids estiver vazia (CLI-29 AC-5)")
+    void deveRetornar400SemEfeitosColateraisQuandoListaIdsEstiverVazia() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Ativo", "vazio@exemplo.com");
+        assertPatchInativarLoteInvalidoPreservaEstado(payloadInativarLote(List.of()), List.of(c1));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 sem efeitos colaterais quando lista ids contiver item nulo (CLI-29 AC-6)")
+    void deveRetornar400SemEfeitosColateraisQuandoListaIdsContiverItemNulo() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Ativo", "itemnulo@exemplo.com");
+        assertPatchInativarLoteInvalidoPreservaEstado(
+                payloadInativarLote(Arrays.asList(c1.getId(), null)),
+                List.of(c1));
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 sem efeitos colaterais quando lote possuir 101 identificadores (CLI-29 AC-7)")
+    void deveRetornar400SemEfeitosColateraisQuandoLotePossuir101Identificadores() throws Exception {
+        List<Cliente> clientes = salvarClientesAtivosEmLote(101);
+        List<Long> ids = clientes.stream().map(Cliente::getId).toList();
+
+        assertPatchInativarLoteInvalidoPreservaEstado(payloadInativarLote(ids), clientes);
+    }
+
+    @Test
+    @DisplayName("Deve retornar HTTP 400 antes da desduplicação quando lote possuir 101 itens com duplicatas (CLI-29 AC-7)")
+    void deveRetornar400AntesDaDesduplicacaoQuandoLotePossuir101ItensComDuplicatas() throws Exception {
+        Cliente c1 = salvarERecarregar("Cliente Um", "limite.dup1@exemplo.com");
+        Cliente c2 = salvarERecarregar("Cliente Dois", "limite.dup2@exemplo.com");
+        List<Long> idsComDuplicatas = new ArrayList<>(101);
+        for (int i = 0; i < 101; i++) {
+            idsComDuplicatas.add(i % 2 == 0 ? c1.getId() : c2.getId());
+        }
+
+        assertPatchInativarLoteInvalidoPreservaEstado(payloadInativarLote(idsComDuplicatas), List.of(c1, c2));
+    }
+
+    @Test
+    @DisplayName("Deve processar e inativar com sucesso exatamente 100 clientes distintos (CLI-29 AC-8)")
+    void deveInativarComSucessoExatamente100ClientesDistintos() throws Exception {
+        Cliente naoAfetado = salvarERecarregar("Cliente Fora do Lote", "fora.lote@exemplo.com");
+        List<Cliente> clientes = salvarClientesAtivosEmLote(100);
+        List<Long> ids = clientes.stream().map(Cliente::getId).toList();
+
+        ResultActions resultado = executarPatchInativarLote(payloadInativarLote(ids))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalProcessados").value(100))
+                .andExpect(jsonPath("$.idsInativados", hasSize(100)));
+
+        for (int i = 0; i < ids.size(); i++) {
+            resultado.andExpect(jsonPath("$.idsInativados[" + i + "]").value(ids.get(i)));
+        }
+
+        for (Cliente cliente : clientes) {
+            assertFalse(repository.findById(cliente.getId()).orElseThrow().isAtivo());
+        }
+        assertTrue(repository.findById(naoAfetado.getId()).orElseThrow().isAtivo());
     }
 }
