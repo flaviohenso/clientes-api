@@ -3,6 +3,8 @@ package com.example.clientes.controller;
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteEmailRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.service.ClienteService;
@@ -73,6 +75,14 @@ public class ClienteController {
     @PutMapping("/{id}")
     public ClienteResponse atualizar(@PathVariable Long id, @Valid @RequestBody ClienteRequest request) {
         return service.atualizar(id, request);
+    }
+
+    /**
+     * Inativa atomicamente e de forma idempotente um lote de 1 a 100 clientes pelos seus IDs.
+     */
+    @PatchMapping("/inativar-lote")
+    public ClienteInativacaoLoteResponse inativarEmLote(@Valid @RequestBody ClienteInativacaoLoteRequest request) {
+        return service.inativarEmLote(request);
     }
 
     /**
