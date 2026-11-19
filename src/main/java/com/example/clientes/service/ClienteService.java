@@ -4,6 +4,8 @@ import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteEmailRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -13,6 +15,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
@@ -109,6 +115,31 @@ public class ClienteService {
     @Transactional
     public void inativar(Long id) {
         obter(id).inativar();
+    }
+
+    /**
+     * Inativa atomicamente e de forma idempotente os clientes cujos IDs foram informados,
+     * desduplicando a lista preservando a ordem da primeira ocorrência.
+     */
+    @Transactional
+    public ClienteInativacaoLoteResponse inativarEmLote(ClienteInativacaoLoteRequest request) {
+        List<Long> idsUnicos = request.ids().stream()
+                .distinct()
+                .toList();
+
+        List<Cliente> clientes = repository.findAllById(idsUnicos);
+        Set<Long> idsEncontrados = clientes.stream()
+                .map(Cliente::getId)
+                .collect(Collectors.toSet());
+
+        for (Long id : idsUnicos) {
+            if (!idsEncontrados.contains(id)) {
+                throw new ClienteNaoEncontradoException(id);
+            }
+        }
+
+        clientes.forEach(Cliente::inativar);
+        return new ClienteInativacaoLoteResponse(idsUnicos.size(), idsUnicos);
     }
 
     @Transactional
