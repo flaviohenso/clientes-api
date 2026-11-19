@@ -42,6 +42,14 @@ public class Cliente {
         this.email = email;
     }
 
+    /**
+     * Atualiza exclusivamente o e-mail do cliente, preservando nome, status e data de criação,
+     * inclusive quando o cliente está inativo.
+     */
+    public void atualizarEmail(String email) {
+        this.email = email;
+    }
+
     public void inativar() {
         this.ativo = false;
     }
