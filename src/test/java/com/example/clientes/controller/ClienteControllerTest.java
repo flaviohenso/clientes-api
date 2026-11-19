@@ -2,9 +2,11 @@ package com.example.clientes.controller;
 
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
+import com.example.clientes.dto.ClienteEmailRequest;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
+import com.example.clientes.exception.EmailJaCadastradoException;
 import com.example.clientes.service.ClienteService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,6 +44,29 @@ class ClienteControllerTest {
 
     @MockitoBean
     ClienteService service;
+
+    private static String payloadEmail(String email) {
+        return "{\"email\":\"%s\"}".formatted(email);
+    }
+
+    private static String emailValidoComTamanho(int tamanhoTotal) {
+        String prefixo = "a".repeat(50) + "@" + "b".repeat(50) + ".";
+        String sufixo = ".com";
+        int restante = tamanhoTotal - prefixo.length() - sufixo.length();
+        return prefixo + "c".repeat(restante) + sufixo;
+    }
+
+    private ResultActions executarPatchEmail(Long id, String payloadJson) throws Exception {
+        return mvc.perform(patch("/api/v1/clientes/{id}/email", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payloadJson));
+    }
+
+    private void executarPatchEmailEsperando400(String payloadJson) throws Exception {
+        executarPatchEmail(1L, payloadJson)
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
 
     @Test
     void criaClienteRetorna201ComLocation() throws Exception {
@@ -304,5 +330,155 @@ class ClienteControllerTest {
                 .andExpect(jsonPath("$.status").value(400));
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("Deve atualizar e-mail e retornar 200 OK preservando nome, ativo e criadoEm (CLI-28 AC-1)")
+    void atualizarEmailRetorna200PreservandoDemaisCampos() throws Exception {
+        Instant criadoEm = Instant.parse("2026-01-10T10:00:00Z");
+        ClienteResponse response = new ClienteResponse(1L, "Maria Silva", "maria.nova@exemplo.com", true, criadoEm);
+        when(service.atualizarEmail(eq(1L), any(ClienteEmailRequest.class))).thenReturn(response);
+
+        executarPatchEmail(1L, payloadEmail("maria.nova@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.nome").value("Maria Silva"))
+                .andExpect(jsonPath("$.email").value("maria.nova@exemplo.com"))
+                .andExpect(jsonPath("$.ativo").value(true))
+                .andExpect(jsonPath("$.criadoEm").value("2026-01-10T10:00:00Z"));
+
+        verify(service).atualizarEmail(eq(1L), eq(new ClienteEmailRequest("maria.nova@exemplo.com")));
+    }
+
+    @Test
+    @DisplayName("Deve remover espaços laterais do e-mail e retornar 200 OK (CLI-28 AC-2)")
+    void atualizarEmailComEspacosLateraisFazTrimERetorna200() throws Exception {
+        Instant criadoEm = Instant.parse("2026-01-10T10:00:00Z");
+        ClienteResponse response = new ClienteResponse(1L, "Maria Silva", "nova.com.espacos@exemplo.com", true, criadoEm);
+        when(service.atualizarEmail(eq(1L), any(ClienteEmailRequest.class))).thenReturn(response);
+
+        executarPatchEmail(1L, payloadEmail("  nova.com.espacos@exemplo.com  "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.nome").value("Maria Silva"))
+                .andExpect(jsonPath("$.email").value("nova.com.espacos@exemplo.com"))
+                .andExpect(jsonPath("$.ativo").value(true))
+                .andExpect(jsonPath("$.criadoEm").value("2026-01-10T10:00:00Z"));
+
+        verify(service).atualizarEmail(eq(1L), eq(new ClienteEmailRequest("nova.com.espacos@exemplo.com")));
+    }
+
+    @Test
+    @DisplayName("Deve tratar atualização com mesmo e-mail case-insensitive de forma idempotente retornando 200 OK (CLI-28 AC-3)")
+    void atualizarEmailIdempotenteCaseInsensitiveRetorna200() throws Exception {
+        Instant criadoEm = Instant.parse("2026-01-10T10:00:00Z");
+        ClienteResponse response = new ClienteResponse(1L, "Maria Silva", "maria@exemplo.com", true, criadoEm);
+        when(service.atualizarEmail(eq(1L), any(ClienteEmailRequest.class))).thenReturn(response);
+
+        executarPatchEmail(1L, payloadEmail("MARIA@EXEMPLO.COM"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.nome").value("Maria Silva"))
+                .andExpect(jsonPath("$.ativo").value(true))
+                .andExpect(jsonPath("$.criadoEm").value("2026-01-10T10:00:00Z"));
+
+        verify(service).atualizarEmail(eq(1L), eq(new ClienteEmailRequest("MARIA@EXEMPLO.COM")));
+    }
+
+    @Test
+    @DisplayName("Deve atualizar e-mail de cliente inativo mantendo ativo=false e retornando 200 OK (CLI-28 AC-4)")
+    void atualizarEmailDeClienteInativoMantemAtivoFalse() throws Exception {
+        Instant criadoEm = Instant.parse("2026-01-05T08:30:00Z");
+        ClienteResponse response = new ClienteResponse(2L, "João Souza", "joao.atualizado@exemplo.com", false, criadoEm);
+        when(service.atualizarEmail(eq(2L), any(ClienteEmailRequest.class))).thenReturn(response);
+
+        executarPatchEmail(2L, payloadEmail("joao.atualizado@exemplo.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(2))
+                .andExpect(jsonPath("$.nome").value("João Souza"))
+                .andExpect(jsonPath("$.email").value("joao.atualizado@exemplo.com"))
+                .andExpect(jsonPath("$.ativo").value(false))
+                .andExpect(jsonPath("$.criadoEm").value("2026-01-05T08:30:00Z"));
+
+        verify(service).atualizarEmail(eq(2L), eq(new ClienteEmailRequest("joao.atualizado@exemplo.com")));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 409 Conflict ProblemDetail quando e-mail já estiver cadastrado para outro cliente (CLI-28 AC-5)")
+    void atualizarEmailDuplicadoRetorna409ProblemDetail() throws Exception {
+        when(service.atualizarEmail(eq(1L), any(ClienteEmailRequest.class)))
+                .thenThrow(EmailJaCadastradoException.class);
+
+        executarPatchEmail(1L, payloadEmail("outro.cliente@exemplo.com"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.title").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("Deve retornar 404 Not Found ProblemDetail quando id não existir (CLI-28 AC-6)")
+    void atualizarEmailDeClienteInexistenteRetorna404ProblemDetail() throws Exception {
+        when(service.atualizarEmail(eq(999L), any(ClienteEmailRequest.class)))
+                .thenThrow(new ClienteNaoEncontradoException(999L));
+
+        executarPatchEmail(999L, payloadEmail("qualquer@exemplo.com"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.detail").value("Cliente 999 não encontrado"));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando campo email estiver ausente no payload (CLI-28 AC-7)")
+    void atualizarEmailSemCampoEmailRetorna400() throws Exception {
+        executarPatchEmailEsperando400("{}");
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando campo email for nulo (CLI-28 AC-7)")
+    void atualizarEmailComValorNuloRetorna400() throws Exception {
+        executarPatchEmailEsperando400("{\"email\":null}");
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando campo email for vazio (CLI-28 AC-7)")
+    void atualizarEmailComValorVazioRetorna400() throws Exception {
+        executarPatchEmailEsperando400(payloadEmail(""));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando campo email contiver apenas espaços (CLI-28 AC-7)")
+    void atualizarEmailComSomenteEspacosRetorna400() throws Exception {
+        executarPatchEmailEsperando400(payloadEmail("   "));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando e-mail possuir formato inválido (CLI-28 AC-8)")
+    void atualizarEmailComFormatoInvalidoRetorna400() throws Exception {
+        executarPatchEmailEsperando400(payloadEmail("email-invalido"));
+    }
+
+    @Test
+    @DisplayName("Deve retornar 400 Bad Request quando e-mail válido ultrapassar 160 caracteres (CLI-28 AC-9)")
+    void atualizarEmailCom161CaracteresRetorna400() throws Exception {
+        executarPatchEmailEsperando400(payloadEmail(emailValidoComTamanho(161)));
+    }
+
+    @Test
+    @DisplayName("Deve aceitar e-mail válido com exatos 160 caracteres retornando 200 OK (CLI-28 AC-10)")
+    void atualizarEmailValidoCom160CaracteresRetorna200() throws Exception {
+        String email160 = emailValidoComTamanho(160);
+        Instant criadoEm = Instant.parse("2026-01-10T10:00:00Z");
+        ClienteResponse response = new ClienteResponse(1L, "Maria Silva", email160, true, criadoEm);
+        when(service.atualizarEmail(eq(1L), any(ClienteEmailRequest.class))).thenReturn(response);
+
+        executarPatchEmail(1L, payloadEmail(email160))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.nome").value("Maria Silva"))
+                .andExpect(jsonPath("$.email").value(email160))
+                .andExpect(jsonPath("$.ativo").value(true))
+                .andExpect(jsonPath("$.criadoEm").value("2026-01-10T10:00:00Z"));
+
+        verify(service).atualizarEmail(eq(1L), eq(new ClienteEmailRequest(email160)));
     }
 }
