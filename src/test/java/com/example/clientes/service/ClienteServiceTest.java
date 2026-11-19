@@ -4,6 +4,8 @@ import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
 import com.example.clientes.dto.ClienteEmailRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteRequest;
+import com.example.clientes.dto.ClienteInativacaoLoteResponse;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -19,16 +21,21 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -524,5 +531,148 @@ class ClienteServiceTest {
         assertThat(cliente.getEmail()).isEqualTo(email160);
         verify(repository).findById(1L);
         verify(repository).existsByEmailIgnoreCase(email160);
+    }
+
+    @Test
+    @DisplayName("Deve inativar em lote todos os clientes ativos com sucesso preservando a ordem (AC-1)")
+    void deveInativarEmLoteClientesAtivosComSucesso() {
+        Cliente cliente1 = criarCliente(1L, "Ana", "ana@x.com");
+        Cliente cliente2 = criarCliente(2L, "Bruno", "bruno@x.com");
+        Cliente cliente3 = criarCliente(3L, "Carla", "carla@x.com");
+
+        when(repository.findAllById(List.of(1L, 2L, 3L))).thenReturn(List.of(cliente1, cliente2, cliente3));
+
+        ClienteInativacaoLoteResponse resposta = service.inativarEmLote(
+                new ClienteInativacaoLoteRequest(List.of(1L, 2L, 3L)));
+
+        assertThat(resposta.totalProcessados()).isEqualTo(3);
+        assertThat(resposta.idsInativados()).containsExactly(1L, 2L, 3L);
+        assertThat(cliente1.isAtivo()).isFalse();
+        assertThat(cliente2.isAtivo()).isFalse();
+        assertThat(cliente3.isAtivo()).isFalse();
+        verify(repository).findAllById(List.of(1L, 2L, 3L));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Deve inativar lote misto de forma idempotente mantendo cliente já inativo e retornando todos os IDs (AC-2)")
+    void deveInativarEmLoteMistoDeFormaIdempotente() {
+        Cliente clienteAtivo = criarCliente(1L, "Ana", "ana@x.com");
+        Cliente clienteJaInativo = criarCliente(2L, "Bruno", "bruno@x.com");
+        clienteJaInativo.inativar();
+        assertThat(clienteAtivo.isAtivo()).isTrue();
+        assertThat(clienteJaInativo.isAtivo()).isFalse();
+
+        when(repository.findAllById(List.of(1L, 2L))).thenReturn(List.of(clienteAtivo, clienteJaInativo));
+
+        ClienteInativacaoLoteResponse resposta = service.inativarEmLote(
+                new ClienteInativacaoLoteRequest(List.of(1L, 2L)));
+
+        assertThat(resposta.totalProcessados()).isEqualTo(2);
+        assertThat(resposta.idsInativados()).containsExactly(1L, 2L);
+        assertThat(clienteAtivo.isAtivo()).isFalse();
+        assertThat(clienteJaInativo.isAtivo()).isFalse();
+        verify(repository).findAllById(List.of(1L, 2L));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Deve desduplicar IDs preservando a ordem da primeira ocorrência e processar cada cliente uma única vez (AC-3)")
+    void deveDesduplicarIdsPreservandoOrdemEProcessarCadaClienteUmaUnicaVez() {
+        Cliente cliente1 = criarClienteSpy(1L, "Ana", "ana@x.com");
+        Cliente cliente2 = criarClienteSpy(2L, "Bruno", "bruno@x.com");
+
+        when(repository.findAllById(List.of(1L, 2L))).thenReturn(List.of(cliente1, cliente2));
+
+        ClienteInativacaoLoteResponse resposta = service.inativarEmLote(
+                new ClienteInativacaoLoteRequest(List.of(1L, 2L, 1L, 2L)));
+
+        assertThat(resposta.totalProcessados()).isEqualTo(2);
+        assertThat(resposta.idsInativados()).containsExactly(1L, 2L);
+        assertThat(cliente1.isAtivo()).isFalse();
+        assertThat(cliente2.isAtivo()).isFalse();
+        verify(cliente1, times(1)).inativar();
+        verify(cliente2, times(1)).inativar();
+        verify(repository, times(1)).findAllById(List.of(1L, 2L));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Deve preservar ordem de primeira ocorrência na desduplicação mesmo quando o repositório retorna em outra ordem (AC-3)")
+    void devePreservarOrdemDePrimeiraOcorrenciaNaDesduplicacao() {
+        Cliente cliente1 = criarClienteSpy(1L, "Ana", "ana@x.com");
+        Cliente cliente2 = criarClienteSpy(2L, "Bruno", "bruno@x.com");
+        Cliente cliente3 = criarClienteSpy(3L, "Carla", "carla@x.com");
+
+        when(repository.findAllById(List.of(3L, 1L, 2L))).thenReturn(List.of(cliente1, cliente2, cliente3));
+
+        ClienteInativacaoLoteResponse resposta = service.inativarEmLote(
+                new ClienteInativacaoLoteRequest(List.of(3L, 1L, 3L, 2L, 1L)));
+
+        assertThat(resposta.totalProcessados()).isEqualTo(3);
+        assertThat(resposta.idsInativados()).containsExactly(3L, 1L, 2L);
+        assertThat(cliente1.isAtivo()).isFalse();
+        assertThat(cliente2.isAtivo()).isFalse();
+        assertThat(cliente3.isAtivo()).isFalse();
+        verify(cliente1, times(1)).inativar();
+        verify(cliente2, times(1)).inativar();
+        verify(cliente3, times(1)).inativar();
+        verify(repository, times(1)).findAllById(List.of(3L, 1L, 2L));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Deve abortar antes de qualquer alteração e lançar ClienteNaoEncontradoException quando ao menos um ID não existir (AC-4)")
+    void deveAbortarSemAlterarClientesQuandoAlgumIdNaoExistir() {
+        Cliente cliente1 = criarClienteSpy(1L, "Ana", "ana@x.com");
+        Cliente cliente2 = criarClienteSpy(2L, "Bruno", "bruno@x.com");
+
+        when(repository.findAllById(List.of(1L, 999L, 2L))).thenReturn(List.of(cliente1, cliente2));
+
+        assertThatThrownBy(() -> service.inativarEmLote(
+                new ClienteInativacaoLoteRequest(List.of(1L, 999L, 2L))))
+                .isInstanceOf(ClienteNaoEncontradoException.class)
+                .hasMessage("Cliente 999 não encontrado");
+
+        assertThat(cliente1.isAtivo()).isTrue();
+        assertThat(cliente2.isAtivo()).isTrue();
+        verify(cliente1, never()).inativar();
+        verify(cliente2, never()).inativar();
+        verify(repository).findAllById(List.of(1L, 999L, 2L));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Deve inativar em lote exatamente 100 clientes distintos no limite máximo permitido (AC-8)")
+    void deveInativarEmLoteNoLimiteMaximoDe100IdsDistintos() {
+        List<Long> ids = LongStream.rangeClosed(1L, 100L).boxed().toList();
+        List<Cliente> clientes = ids.stream()
+                .map(id -> criarCliente(id, "Cliente " + id, "cliente" + id + "@exemplo.com"))
+                .toList();
+
+        when(repository.findAllById(ids)).thenReturn(clientes);
+
+        ClienteInativacaoLoteResponse resposta = service.inativarEmLote(new ClienteInativacaoLoteRequest(ids));
+
+        assertThat(resposta.totalProcessados()).isEqualTo(100);
+        assertThat(resposta.idsInativados()).hasSize(100).containsExactlyElementsOf(ids);
+        assertThat(clientes).allSatisfy(cliente -> assertThat(cliente.isAtivo()).isFalse());
+        verify(repository).findAllById(ids);
+        verifyNoMoreInteractions(repository);
+    }
+
+    private static Cliente criarCliente(Long id, String nome, String email) {
+        return criarCliente(id, nome, email, false);
+    }
+
+    private static Cliente criarClienteSpy(Long id, String nome, String email) {
+        return criarCliente(id, nome, email, true);
+    }
+
+    private static Cliente criarCliente(Long id, String nome, String email, boolean comSpy) {
+        Cliente instancia = new Cliente(nome, email);
+        Cliente cliente = comSpy ? spy(instancia) : instancia;
+        ReflectionTestUtils.setField(cliente, "id", id);
+        return cliente;
     }
 }
