@@ -3,6 +3,7 @@ package com.example.clientes.service;
 import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
+import com.example.clientes.dto.ClienteEmailRequest;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -354,5 +356,173 @@ class ClienteServiceTest {
         assertThat(resposta.existe()).isTrue();
         verify(repository).existsByEmailIgnoreCase("maria@exemplo.com");
         verify(repository, never()).existsByEmailIgnoreCase("   maria@exemplo.com  ");
+    }
+
+    @Test
+    @DisplayName("Deve atualizar e-mail com sucesso preservando nome, ativo e criadoEm (AC-1)")
+    void deveAtualizarEmailComSucessoPreservandoDemaisCampos() {
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(repository.existsByEmailIgnoreCase("maria.nova@exemplo.com")).thenReturn(false);
+
+        ClienteResponse resposta = service.atualizarEmail(1L, new ClienteEmailRequest("maria.nova@exemplo.com"));
+
+        assertThat(resposta.email()).isEqualTo("maria.nova@exemplo.com");
+        assertThat(resposta.nome()).isEqualTo("Maria Silva");
+        assertThat(resposta.ativo()).isTrue();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo("maria.nova@exemplo.com");
+        assertThat(cliente.getNome()).isEqualTo("Maria Silva");
+        assertThat(cliente.isAtivo()).isTrue();
+        assertThat(cliente.getCriadoEm()).isEqualTo(criadoEmOriginal);
+        verify(repository).findById(1L);
+        verify(repository).existsByEmailIgnoreCase("maria.nova@exemplo.com");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Deve remover espaços das extremidades antes da checagem de duplicidade e persistência (AC-2)")
+    void deveRemoverEspacosDoEmailAntesDaChecagemDeDuplicidadeEPersistencia() {
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(repository.existsByEmailIgnoreCase("nova.com.espacos@exemplo.com")).thenReturn(false);
+
+        ClienteResponse resposta = service.atualizarEmail(
+                1L, new ClienteEmailRequest("  nova.com.espacos@exemplo.com  "));
+
+        assertThat(resposta.email()).isEqualTo("nova.com.espacos@exemplo.com");
+        assertThat(resposta.nome()).isEqualTo("Maria Silva");
+        assertThat(resposta.ativo()).isTrue();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo("nova.com.espacos@exemplo.com");
+        verify(repository).findById(1L);
+        verify(repository).existsByEmailIgnoreCase("nova.com.espacos@exemplo.com");
+        verify(repository, never()).existsByEmailIgnoreCase("  nova.com.espacos@exemplo.com  ");
+    }
+
+    @Test
+    @DisplayName("Deve tratar atualização com o mesmo e-mail em caixa diferente de forma idempotente (AC-3)")
+    void deveTratarIdempotenciaCaseInsensitiveParaProprioCliente() {
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+
+        ClienteResponse resposta = service.atualizarEmail(1L, new ClienteEmailRequest("MARIA@EXEMPLO.COM"));
+
+        assertThat(resposta.email()).isEqualTo("MARIA@EXEMPLO.COM");
+        assertThat(resposta.nome()).isEqualTo("Maria Silva");
+        assertThat(resposta.ativo()).isTrue();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo("MARIA@EXEMPLO.COM");
+        verify(repository).findById(1L);
+        verify(repository, never()).existsByEmailIgnoreCase(any());
+    }
+
+    @Test
+    @DisplayName("Deve aplicar trim antes da checagem de idempotência case-insensitive para o próprio cliente")
+    void deveTratarIdempotenciaCaseInsensitiveComEspacosAoRedor() {
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+
+        ClienteResponse resposta = service.atualizarEmail(1L, new ClienteEmailRequest("  MARIA@EXEMPLO.COM  "));
+
+        assertThat(resposta.email()).isEqualTo("MARIA@EXEMPLO.COM");
+        assertThat(resposta.nome()).isEqualTo("Maria Silva");
+        assertThat(resposta.ativo()).isTrue();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo("MARIA@EXEMPLO.COM");
+        verify(repository).findById(1L);
+        verify(repository, never()).existsByEmailIgnoreCase(any());
+    }
+
+    @Test
+    @DisplayName("Deve permitir troca de e-mail para cliente inativo mantendo ativo igual a false (AC-4)")
+    void devePermitirTrocaDeEmailParaClienteInativoMantendoAtivoFalse() {
+        Cliente cliente = new Cliente("João Souza", "joao@exemplo.com");
+        cliente.inativar();
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+        assertThat(cliente.isAtivo()).isFalse();
+
+        when(repository.findById(2L)).thenReturn(Optional.of(cliente));
+        when(repository.existsByEmailIgnoreCase("joao.atualizado@exemplo.com")).thenReturn(false);
+
+        ClienteResponse resposta = service.atualizarEmail(2L, new ClienteEmailRequest("joao.atualizado@exemplo.com"));
+
+        assertThat(resposta.email()).isEqualTo("joao.atualizado@exemplo.com");
+        assertThat(resposta.nome()).isEqualTo("João Souza");
+        assertThat(resposta.ativo()).isFalse();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo("joao.atualizado@exemplo.com");
+        assertThat(cliente.getNome()).isEqualTo("João Souza");
+        assertThat(cliente.isAtivo()).isFalse();
+        assertThat(cliente.getCriadoEm()).isEqualTo(criadoEmOriginal);
+        verify(repository).findById(2L);
+        verify(repository).existsByEmailIgnoreCase("joao.atualizado@exemplo.com");
+    }
+
+    @Test
+    @DisplayName("Deve lançar EmailJaCadastradoException quando e-mail já estiver em uso por outro cliente (AC-5)")
+    void deveRejeitarAtualizacaoQuandoEmailPertencerAOutroClienteCaseInsensitive() {
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(repository.existsByEmailIgnoreCase("outro.cliente@exemplo.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.atualizarEmail(1L, new ClienteEmailRequest("outro.cliente@exemplo.com")))
+                .isInstanceOf(EmailJaCadastradoException.class)
+                .hasMessage("E-mail outro.cliente@exemplo.com já cadastrado");
+
+        assertThat(cliente.getEmail()).isEqualTo("maria@exemplo.com");
+        assertThat(cliente.getNome()).isEqualTo("Maria Silva");
+        assertThat(cliente.isAtivo()).isTrue();
+        assertThat(cliente.getCriadoEm()).isEqualTo(criadoEmOriginal);
+        verify(repository).findById(1L);
+        verify(repository).existsByEmailIgnoreCase("outro.cliente@exemplo.com");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Deve lançar ClienteNaoEncontradoException precedendo checagem de conflito quando cliente não existir (AC-6)")
+    void deveLancarExcecaoQuandoClienteNaoExistirPrecedendoConflito() {
+        when(repository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.atualizarEmail(999L, new ClienteEmailRequest("qualquer@exemplo.com")))
+                .isInstanceOf(ClienteNaoEncontradoException.class)
+                .hasMessage("Cliente 999 não encontrado");
+
+        verify(repository).findById(999L);
+        verify(repository, never()).existsByEmailIgnoreCase(any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Deve persistir atualização de e-mail válido com exatamente 160 caracteres (AC-10)")
+    void deveAtualizarEmailValidoCom160Caracteres() {
+        String email160 = "a".repeat(64) + "@" + "b".repeat(45) + "." + "c".repeat(45) + ".com";
+        assertThat(email160).hasSize(160);
+
+        Cliente cliente = new Cliente("Maria Silva", "maria@exemplo.com");
+        Instant criadoEmOriginal = cliente.getCriadoEm();
+
+        when(repository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(repository.existsByEmailIgnoreCase(email160)).thenReturn(false);
+
+        ClienteResponse resposta = service.atualizarEmail(1L, new ClienteEmailRequest(email160));
+
+        assertThat(resposta.email()).isEqualTo(email160);
+        assertThat(resposta.nome()).isEqualTo("Maria Silva");
+        assertThat(resposta.ativo()).isTrue();
+        assertThat(resposta.criadoEm()).isEqualTo(criadoEmOriginal);
+        assertThat(cliente.getEmail()).isEqualTo(email160);
+        verify(repository).findById(1L);
+        verify(repository).existsByEmailIgnoreCase(email160);
     }
 }

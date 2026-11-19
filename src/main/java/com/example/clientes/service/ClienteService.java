@@ -3,6 +3,7 @@ package com.example.clientes.service;
 import com.example.clientes.domain.Cliente;
 import com.example.clientes.dto.ClienteContagemResponse;
 import com.example.clientes.dto.ClienteEmailExisteResponse;
+import com.example.clientes.dto.ClienteEmailRequest;
 import com.example.clientes.dto.ClienteRequest;
 import com.example.clientes.dto.ClienteResponse;
 import com.example.clientes.exception.ClienteNaoEncontradoException;
@@ -86,6 +87,22 @@ public class ClienteService {
             throw new EmailJaCadastradoException(request.email());
         }
         cliente.atualizar(request.nome(), request.email());
+        return ClienteResponse.from(cliente);
+    }
+
+    /**
+     * Atualiza exclusivamente o e-mail de um cliente existente (ativo ou inativo),
+     * validando duplicidade de forma case-insensitive apenas quando houver alteração.
+     */
+    @Transactional
+    public ClienteResponse atualizarEmail(Long id, ClienteEmailRequest request) {
+        Cliente cliente = obter(id);
+        String emailNormalizado = request.email().trim();
+        if (!cliente.getEmail().equalsIgnoreCase(emailNormalizado)
+                && repository.existsByEmailIgnoreCase(emailNormalizado)) {
+            throw new EmailJaCadastradoException(emailNormalizado);
+        }
+        cliente.atualizarEmail(emailNormalizado);
         return ClienteResponse.from(cliente);
     }
 
